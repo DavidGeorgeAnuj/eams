@@ -8,6 +8,8 @@ service EAMSService @(path: '/eams') {
     { grant: ['CREATE', 'DELETE'], to: ['AssetAdmin'] },
     { grant: 'UPDATE', to: ['AssetAdmin', 'ITSupport'] }
   ]
+  @Capabilities.InsertRestrictions.Insertable: true
+  @odata.draft.enabled
   entity Assets as projection on eams.Asset;
 
   @requires: 'SysAdmin'
@@ -18,6 +20,8 @@ service EAMSService @(path: '/eams') {
     { grant: '*', to: ['Manager'] },
     { grant: 'READ', to: ['ITSupport'] }
   ]
+  @Capabilities.InsertRestrictions.Insertable: true
+  @odata.draft.enabled
   entity AssetRequests as projection on eams.AssetRequest actions {
     action approve(remarks: String) returns AssetRequests;
     action rejectRequest(remarks: String @mandatory) returns AssetRequests;

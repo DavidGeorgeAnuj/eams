@@ -28,6 +28,11 @@ annotate service.Assets with @(
                 Label : 'status',
                 Value : status,
             },
+            {
+                $Type : 'UI.DataField',
+                Label : 'currentHolder',
+                Value : currentHolder_ID,
+            },
         ],
     },
     UI.Facets : [
@@ -63,6 +68,11 @@ annotate service.Assets with @(
             $Type : 'UI.DataField',
             Label : 'status',
             Value : status,
+        },
+        {
+            $Type : 'UI.DataField',
+            Label : 'currentHolder',
+            Value : currentHolder_ID,
         },
     ],
 );

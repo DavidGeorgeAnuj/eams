@@ -378,3 +378,148 @@ End-to-end confirmed working: approuter → HTML5 app → backend → HANA data
    actual entity the UI queries (`AssetRequests` → needs `Employee`,
    `Manager`, or `ITSupport`; `SysAdmin` does not cover it, despite sounding
    like it should have the broadest access).
+
+## 2026-08-07 — Missing "Create" button in Fiori Elements (separate from routing/auth)
+
+While doing manual lifecycle testing, user reported no "Create" button on the
+`/requests` app's AssetRequests list (and later, same on `/assets`/Assets).
+This took several wrong turns before landing on the real cause — worth
+recording precisely so the mistakes aren't repeated.
+
+### Wrong turn #1: misread grep output as "Insertable: false" on AssetRequests
+Ran `cf run-task eams-srv` to compile the live model to EDMX in-process
+(no HTTP, no auth needed — same trick as reading `xs-app.json` earlier) and
+grepped for `InsertRestrictions`. Found `Insertable Bool="false"` and
+wrongly attributed it to `AssetRequests`. On closer line-by-line tracing,
+that block actually belonged to `InventoryReport` (a `@readonly` reporting
+view — correctly not insertable). **AssetRequests had no capability
+restriction in the metadata at all.** Told the user the wrong thing here;
+corrected once traced properly. Lesson: when grepping structured XML for a
+property value, always trace back to its enclosing `<Annotations Target=...>`
+block by line number — don't assume proximity in a `-A N` grep window means
+the same target.
+
+### Wrong turn #2: assumed it was CAP's `@restrict` auto-hiding the button
+Confirmed via WebSearch that CAP's `@restrict` is backend-enforcement only
+and does NOT auto-generate `Capabilities.InsertRestrictions` metadata (that
+was speculation, not fact). So absence of any restriction should mean
+"insertable" by spec default — yet the button still didn't show even for
+`Manager`, who has explicit `CREATE` grant. Added an explicit
+`@Capabilities.InsertRestrictions.Insertable: true` annotation on both
+`Assets` and `AssetRequests` anyway (a legitimate, known fix pattern per
+SAP Community threads for exactly this symptom) — rebuilt, redeployed,
+verified byte-for-byte live via `cf run-task` compiling `srv/csn.json`
+in-process. **Confirmed `Insertable="true"` genuinely on the wire** (verified
+independently by the user pasting the real Network-tab response body with
+browser cache disabled — a real `200`, not a stale `304`). Still no Create
+button. So this wasn't the cause either — just a legitimate improvement
+that was already latent best-practice.
+
+Side lesson mid-investigation: a `304 Not Modified` response with a matching
+`ETag`/`If-None-Match` means the browser reused a cached body — the actual
+content served was NOT re-inspected. Always check DevTools Network tab with
+"Disable cache" ticked before trusting what a `304` response "shows."
+
+### Wrong turn #3 (partial): assumed missing `tableSettings.creationMode`
+Found via WebSearch that Fiori Elements' `sap.fe.templates.ListReport` for
+non-draft OData V4 services often needs an explicit `creationMode` (e.g.
+`{"name": "NewPage"}`) under `tableSettings` in the manifest — ours only had
+`{"type": "ResponsiveTable"}`. Added it to both `app/assets/webapp/manifest.json`
+and `app/requests/webapp/manifest.json`. This is a real, correct config
+addition (needed regardless), but alone still did not make the Create
+button appear.
+
+### Actual root cause: non-draft OData V4 entities don't get a List Report
+Create button in `sap.fe.templates.ListReport`, period
+Multiple independent SAP Community threads (including one on this EXACT
+stack — CAP Node.js, `Capabilities.InsertRestrictions.Insertable: true`
+explicitly set) converge on the same unresolved community answer: **"With
+OData V4, create button becomes visible only if you enable draft."** No
+combination of capability annotations or `creationMode` config overrides
+this for a non-draft entity in `sap.fe.templates.ListReport`. This is a
+known, accepted framework limitation, not a bug in our config.
+
+### Fix: enable `@odata.draft.enabled`
+Added `@odata.draft.enabled` to both `Assets` and `AssetRequests` in
+`srv/service.cds`. This is a real architectural decision (not a one-line
+tweak to shrug off): it introduces the standard Fiori Elements draft
+workflow (New → fill in fields → Save/Discard, with `IsActiveEntity`/
+`HasDraftEntity`/`HasActiveEntity` fields and a `DraftAdministrativeData`
+entity added to the OData model), backed by real HANA shadow tables
+(`AssetRequests_drafts`, `Assets_drafts`, `DRAFT.DraftAdministrativeData`)
+that CAP auto-generates — confirmed present in `gen/db/src/gen/` after
+`mbt build`.
+
+Checked one important interaction before committing to this: CAP defers
+custom `.before('CREATE', ...)` / `.on('CREATE', ...)` handlers to draft
+**activation** (Save), not to the initial "New" click — so the existing
+validation logic in `srv/service.js` (asset-availability check, setting
+`employee_ID`/`requestDate` from the current user) will still fire at the
+right moment, with the form fully filled in, not prematurely on an empty
+draft. This is standard, intentional CAP draft semantics, so the existing
+business logic should compose cleanly without modification.
+
+Rebuilt, redeployed. Verified live via `cf run-task` compiling the deployed
+`srv/csn.json`: `IsActiveEntity: true`, `DraftRoot: true` both confirmed
+present in the real served metadata. No startup or DB errors in
+`eams-srv` logs after the `eams-db-deployer` task ran to create the new
+draft tables.
+
+**Lesson for next time**: for CAP + Fiori Elements `sap.fe.templates.ListReport`
+apps, decide on draft vs. non-draft UP FRONT for any entity that needs a UI
+Create button — don't discover this requirement after the fact through
+capability-annotation archaeology. If an entity genuinely shouldn't have
+draft semantics (e.g., pure workflow-status entities), the practical
+alternative is to not rely on the List Report's generic Create button at
+all — either a custom action/dialog, or programmatic creation (e.g. the
+browser-console `fetch` POST approach used earlier in this session).
+
+## 2026-08-07 — "Provide the missing value" blocking Save on new AssetRequests
+
+Draft mode worked — Create button appeared, user got into the New AssetRequest
+draft object page. But saving was blocked with "Provide the missing value,"
+with no obvious empty field on screen.
+
+### Root cause
+`asset_ID` on `AssetRequests` is `@mandatory` (`Common.FieldControl:
+Mandatory` in `annotations.cds`) since an `AssetRequest` must reference an
+`Asset`. But `app/requests/annotations.cds`'s `UI.FieldGroup` (the object
+page form) only ever listed `requestType`, `status`, `justification`,
+`decisionRemarks`, `requestDate`, `decisionDate` — **`asset` was never added
+to the form fields**, almost certainly left out by whatever generated the
+annotations before the `asset` association was fully wired in. So the
+framework validates the full mandatory-field set from the model, finds
+`asset` empty, and blocks save — but never gave the user anywhere to
+actually fill it in.
+
+### Fix
+Added an `asset` `UI.DataField` (bound to `asset_ID`, which already has a
+`Common.ValueList` annotation wiring up a value-help dialog against
+`Assets` by `assetTag`/`category`/`model`/`serialNumber`) to both the
+`UI.FieldGroup` (object page form) and `UI.LineItem` (list columns, so
+requests are distinguishable by which asset they're about) in
+`app/requests/annotations.cds`. Verified locally that `cds.load()` compiles
+cleanly, and confirmed the `asset` `DataField` is present in the merged
+`gen/srv/srv/csn.json` (the exact model that ships to `eams-srv`) before
+deploying.
+
+Known cosmetic follow-up (not blocking): the field will display the raw
+`asset_ID` GUID rather than a human-readable asset tag in read-only/list
+view, since there's no `Common.Text` annotation resolving it to
+`asset.assetTag`. The value-help picker itself works fine (shows
+assetTag/category/model/serialNumber to choose from); only the
+after-selection display text is not yet friendly. Worth revisiting if it's
+distracting during testing.
+
+### Recurring local-dev gotcha noticed during this stretch
+After every `mbt build`, the root `node_modules/@sap/cds` disappears —
+this project uses npm workspaces (`"workspaces": ["app/*"]`), and `mbt
+build` runs `npm ci` inside `app/requests`/`app/assets` as part of their own
+build steps, which reshuffles the shared root `node_modules` and drops
+packages not needed by those sub-packages. Not a bug, just something to
+remember: **run `npm ci` at the repo root again after any `mbt build`**
+before trying to compile/verify anything locally with `node -e "require('@sap/cds')..."`.
+
+**Status**: fix deployed and verified present in the live merged metadata.
+Awaiting user confirmation that the AssetRequest can now be saved
+end-to-end.

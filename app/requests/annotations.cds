@@ -5,6 +5,11 @@ annotate service.AssetRequests with @(
         Data : [
             {
                 $Type : 'UI.DataField',
+                Label : 'asset',
+                Value : asset_ID,
+            },
+            {
+                $Type : 'UI.DataField',
                 Label : 'requestType',
                 Value : requestType,
             },
@@ -44,6 +49,11 @@ annotate service.AssetRequests with @(
         },
     ],
     UI.LineItem : [
+        {
+            $Type : 'UI.DataField',
+            Label : 'asset',
+            Value : asset_ID,
+        },
         {
             $Type : 'UI.DataField',
             Label : 'requestType',
