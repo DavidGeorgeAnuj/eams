@@ -54,7 +54,7 @@ module.exports = cds.service.impl(async function () {
         UPDATE(AssetRequests).set({ status: 'Approved', approver_ID: approver.ID, decisionDate: new Date(), decisionRemarks: req.data.remarks })
           .where({ ID: request.ID })
       );
-    } else {
+    } else if (request.requestType === 'Return') {
       await tx.run(
         UPDATE('eams.Asset').set({ status: 'Available', currentHolder_ID: null })
           .where({ ID: request.asset_ID })
@@ -63,6 +63,8 @@ module.exports = cds.service.impl(async function () {
         UPDATE(AssetRequests).set({ status: 'Returned', approver_ID: approver.ID, decisionDate: new Date(), decisionRemarks: req.data.remarks })
           .where({ ID: request.ID })
       );
+    } else {
+      return req.reject(400, `Request has an invalid requestType: ${request.requestType}`);
     }
 
     return tx.run(SELECT.one.from(AssetRequests).where({ ID: request.ID }));

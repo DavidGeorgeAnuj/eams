@@ -523,3 +523,226 @@ before trying to compile/verify anything locally with `node -e "require('@sap/cd
 **Status**: fix deployed and verified present in the live merged metadata.
 Awaiting user confirmation that the AssetRequest can now be saved
 end-to-end.
+
+## 2026-08-07 — Full lifecycle manually verified; UX polish pass
+
+User completed the entire manual lifecycle test by hand: create → approve
+(asset allocated, `currentHolder` correctly set) → return → approve
+(asset back to `Available`) → reject → cancel. All state transitions and
+guard rails confirmed working via the live UI. Also checked
+`InventoryReport` directly (`/requests/eams/InventoryReport`) — correctly
+reflected live aggregate counts by category/status.
+
+### UX/integrity polish requested
+1. `status` on `AssetRequests` should be read-only (was freely editable via
+   the form, letting a user bypass the approve/reject/cancel workflow by
+   just typing a new status directly — a real integrity gap, not cosmetic).
+2. `asset` on `AssetRequests` should display by `assetTag`, not raw GUID.
+3. `currentHolder` on `Assets` should display by `email`, not raw GUID.
+4. `requestType` should be a dropdown — already is, via the CDS `enum`'s
+   auto-generated `Validation.AllowedValues`; no change needed.
+
+### Fix: `status @readonly`
+Added `annotate EAMSService.AssetRequests with { status @readonly; };` in
+`srv/service.cds`. Compiles to `Core.Computed: true` in the metadata, which
+Fiori Elements uses to exclude the field from create/edit forms (display
+only). Confirmed the approve/reject/cancel action handlers in
+`srv/service.js` are unaffected — they write `status` via direct
+`UPDATE()` CQL statements inside custom `.on(...)` handlers, which bypass
+the OData-level read-only restriction (that restriction only blocks
+*client* PATCH/POST attempts, not the server's own internal writes).
+
+### Fix: `Common.Text` for `asset`/`currentHolder` — two wrong turns first
+Attempted `annotate service.AssetRequests with { asset_ID @Common.Text: asset.assetTag @Common.TextArrangement: #TextOnly; };`
+— compiled with "COMPILE OK" and no thrown error, but the annotation was
+**silently absent** from the actual output. Two separate bugs stacked here:
+
+1. **Bad chaining syntax**: `elementName @Anno1: val1 @Anno2: val2;` was
+   silently dropped rather than erroring. The correct CDS syntax for
+   multiple annotations on one element is the grouped form:
+   `elementName @( Anno1: val1, Anno2: val2 );`.
+2. **Wrong annotation target**: `asset_ID` doesn't exist as an addressable
+   element in the CSN at `annotate`-processing time — it's a foreign-key
+   shadow property that CAP only materializes in the *final* OData/EDMX
+   output, not in the intermediate compiled model. Confirmed directly:
+   `csn.definitions['EAMSService.AssetRequests'].elements.asset_ID` is
+   `undefined`. The existing (working) `Common.ValueList` annotations were
+   already correctly targeting the **association** (`asset`, `currentHolder`),
+   not the `_ID` shadow field — CAP propagates the annotation down to the
+   generated FK property automatically in the EDMX. Followed the same
+   pattern for `Common.Text`/`Common.TextArrangement` and it worked.
+
+**Lesson for next time**: for CAP CDS annotations on a managed-association's
+foreign key (value help, display text, anything OData-capability-related),
+always annotate the **association name**, never the `<assoc>_ID` shadow
+property — the latter doesn't exist as an annotate target until the final
+OData compilation step. And don't trust "no compile error" as proof an
+annotation took effect — CDS's `annotate` silently no-ops on an
+unresolvable target instead of failing loudly; always verify by grepping
+the actual compiled EDMX output for the expected annotation term.
+
+Also re-confirmed the recurring npm-workspaces `node_modules` reshuffling
+gotcha from earlier — ran into it again needing `npm ci` after `mbt build`.
+
+Rebuilt, verified all three fixes (`Core.Computed` on `status`,
+`Common.Text` on `asset_ID` and `currentHolder_ID`) present in
+`gen/srv/srv/csn.json` — the exact deployment-ready model — before
+deploying. Deployed successfully.
+
+**Status**: awaiting user confirmation that status is now read-only in the
+UI and asset/currentHolder display human-readable text instead of GUIDs.
+
+## 2026-08-08 — "Approve" resulted in status "Returned" — real logic bug
+
+User reported: creating an Allocation request, clicking Approve, and the
+request coming back as `Returned` instead of `Approved`. Also reported
+`requestType` isn't rendering as an enforced dropdown.
+
+### Root cause, confirmed via direct DB query (not guessed)
+Used `cf run-task eams-srv` to run a raw CQL query against `eams.AssetRequest`
+directly (bypassing the OData layer/UI entirely) to inspect actual stored
+values. Found the problem record had **`REQUESTTYPE: null`**.
+
+`approve()` in `srv/service.js` was written as:
+```js
+if (request.requestType === 'Allocation') { ...allocate... }
+else { ...treat as Return... }
+```
+This silently treats **anything that isn't exactly `'Allocation'`** —
+including `null`, a typo, or any future new request type — as a Return.
+That's the actual bug: not "it guessed wrong," but that there was no
+defense against invalid/missing data at all.
+
+Separately, `requestType` had no `@mandatory` in `db/schema.cds` (unlike
+`asset`, which we already fixed earlier), so the form let a request be
+saved without ever setting it — consistent with the user's report that it
+wasn't behaving like an enforced dropdown.
+
+### Fix (two parts, both needed)
+1. `db/schema.cds`: added `@mandatory` to `requestType`. CDS requires
+   annotations on an enum-typed field to be prefixed BEFORE the field
+   (`@mandatory\n  requestType: String(20) enum {...};`), not appended
+   after the closing `enum { }` brace — appending after causes a real
+   syntax error (confirmed via the compiler, not just the editor's
+   linter this time: `cds.load()` threw). Verified `@mandatory` correctly
+   compiles to `Common.FieldControl: Mandatory` in the metadata, and CAP's
+   own generic validation will now reject `CREATE`/draft-activate server-side
+   if it's missing, independent of our custom logic.
+2. `srv/service.js`: changed `approve()`'s `if/else` to
+   `if (Allocation) {...} else if (Return) {...} else reject(400, ...)`.
+   Now an invalid/missing `requestType` fails loudly instead of silently
+   doing the wrong thing — defense in depth even if bad data gets in some
+   other way in the future.
+
+Verified both fixes present in `gen/srv/srv/csn.json` /
+`gen/srv/srv/service.js` (the exact deployment-ready build) before
+deploying, per the discipline established earlier this session.
+
+**Note**: this doesn't retroactively fix the already-corrupted test record
+(`requestType: null`, now stuck showing `Returned`) — that's just leftover
+test data, not something that needs manual cleanup unless it's confusing
+during further testing.
+
+**Lesson for next time**: an `if/else` branching on a business-meaningful
+enum-like field should (almost) never have a bare `else` as the final
+branch unless there are truly only two possible states *and* the field is
+provably non-nullable end-to-end (schema mandatory + generic validation +
+UI enforcement all in place). Otherwise `else` becomes a silent catch-all
+for "anything unexpected," which turns a data problem into a wrong-behavior
+problem instead of a loud error.
+
+## 2026-08-08 — Making `requestType` an actual dropdown
+
+User: mandatory + server-validated wasn't enough, wanted a real functional
+dropdown, "don't care how, just don't break the code."
+
+### Why the earlier fix didn't (and couldn't) work
+Confirmed via WebSearch (not assumption this time): a plain CDS `enum`
+compiles to `Validation.AllowedValues`, which is a **validation-only**
+annotation — it makes the backend reject invalid values, but it does
+**not** make Fiori Elements render a dropdown/Select control. Rendering an
+actual dropdown requires `Common.ValueListWithFixedValues: true` paired
+with a `Common.ValueList` pointing to a real, queryable entity
+(`CollectionPath`) — there is no annotation-only/entity-less shortcut in
+the current Fiori Elements V4 + CAP tooling. Multiple independent SAP
+Community threads confirm this is a known, unavoidable gap for plain
+enums, not something we were missing a flag for.
+
+### Fix: minimal CAP-native "codelist" entity
+Rather than a full backing table with manually-maintained relationships,
+added the lightest version of CAP's own recommended pattern:
+- `db/schema.cds`: new `RequestTypeCode { key code : String(20) enum {
+  Allocation; Return; }; name : String(50); }` — a tiny, standalone
+  reference entity, not an association target for `AssetRequest.requestType`
+  (which stays exactly as it was: a plain string enum column, so
+  `srv/service.js`'s `request.requestType === 'Allocation'` checks are
+  completely unaffected).
+- `db/data/eams-RequestTypeCode.csv`: 2 seed rows (Allocation, Return).
+- `srv/service.cds`: exposed read-only as `RequestTypeCodes`.
+- `app/requests/annotations.cds`: annotated `requestType` with
+  `Common.ValueListWithFixedValues: true` + `Common.ValueList` pointing
+  `CollectionPath: 'RequestTypeCodes'`.
+
+This deliberately keeps `requestType` itself untouched structurally — the
+codelist entity exists purely to give the dropdown something to point at,
+not to become the source of truth or change any existing logic.
+
+Verified end-to-end before declaring done, same discipline as every other
+fix this session:
+1. Confirmed `RequestTypeCodes` EntitySet + `Common.ValueListWithFixedValues`
+   present in a local compile.
+2. After `mbt build`, confirmed the actual HANA deployment artifacts were
+   generated: `eams.RequestTypeCode.hdbtable`,
+   `eams-RequestTypeCode.hdbtabledata`, `EAMSService.RequestTypeCodes.hdbview`.
+3. Re-verified against `gen/srv/srv/csn.json` (the exact deployment-ready
+   model) before deploying.
+4. After deploying, used `cf run-task eams-srv` to query
+   `eams.RequestTypeCode` directly in HANA — confirmed both seed rows
+   (`Allocation`, `Return`) actually landed, not just that the deploy
+   command exited 0.
+
+Hit one unrelated speed bump mid-deploy: `cf deploy` failed with
+"Authentication has expired" (CF CLI session timeout, unrelated to any
+app change — a day had passed since the session started). Had the user
+re-run `cf login` interactively (via the `!` prefix), then redeployed
+successfully.
+
+**Status**: fix deployed, seed data confirmed live in HANA, live traffic
+in `cf logs` shows the user already back in the app with a fresh
+`$metadata` fetch and a new draft request in progress. Awaiting
+confirmation the dropdown actually renders and is selectable.
+
+## 2026-08-08 — Locking down `decisionRemarks`, `approver`, `decisionDate`
+
+User correctly reasoned that `decisionRemarks` has the same integrity gap
+as `status` did: it's only meant to be set as a byproduct of calling
+`approve`/`rejectRequest` (via their `remarks` action parameter), not
+hand-typed on the form. Extended the same fix to `approver` and
+`decisionDate` too — same category of backend-only field, all three set
+exclusively via direct `UPDATE()` inside the custom action handlers in
+`srv/service.js`.
+
+### Another association-vs-FK propagation gap
+`status @readonly;` and `decisionRemarks @readonly;` (plain scalar fields)
+compiled fine — `Core.Computed: true` correctly appeared on them. But
+`approver @readonly;` (an **association**) did NOT propagate to the
+generated `approver_ID` foreign key property at all — confirmed by
+grepping the actual compiled EDMX, not assumed. This is a different flavor
+of the exact same class of bug hit earlier with `Common.Text` (CDS's
+convenience shorthand doesn't always propagate through associations the
+same way explicit vocabulary terms do). Fix: use the raw `@Core.Computed`
+term directly instead of CDS's `@readonly` sugar —
+`approver @Core.Computed;` — which propagated correctly. Verified via the
+same compile-and-grep check for all four fields before rebuilding.
+
+**Lesson for next time**: `@readonly` (and possibly other CDS convenience
+annotations) can NOT be assumed to propagate through an association to its
+generated foreign-key shadow property — always verify against the actual
+compiled EDMX per-field, don't assume one working case (a plain scalar)
+generalizes to another (an association). When it doesn't propagate, drop
+to the explicit underlying OData vocabulary term (`@Core.Computed`,
+`@Capabilities.*`, etc.) applied to the association directly.
+
+Rebuilt, verified all four fields (`status`, `decisionRemarks`,
+`approver_ID`, `decisionDate`) show `Core.Computed: true` in
+`gen/srv/srv/csn.json` before deploying. Deployed successfully.

@@ -24,6 +24,7 @@ entity Asset : cuid, managed {
 entity AssetRequest : cuid, managed {
   employee        : Association to Employee;
   asset           : Association to Asset @mandatory;
+  @mandatory
   requestType     : String(20) enum { Allocation; Return; };
   status          : String(20) enum { Pending; Approved; Rejected; Returned; Cancelled; } default 'Pending';
   justification   : String(500);
@@ -31,4 +32,9 @@ entity AssetRequest : cuid, managed {
   decisionRemarks : String(500);
   requestDate     : DateTime;
   decisionDate    : DateTime;
+}
+
+entity RequestTypeCode {
+  key code : String(20) enum { Allocation; Return; };
+  name     : String(50);
 }

@@ -107,3 +107,10 @@ annotate service.Assets with {
     }
 };
 
+annotate service.Assets with {
+    currentHolder @(
+        Common.Text : currentHolder.email,
+        Common.TextArrangement : #TextOnly
+    );
+};
+

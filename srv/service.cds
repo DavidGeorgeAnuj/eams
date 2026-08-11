@@ -35,4 +35,14 @@ service EAMSService @(path: '/eams') {
     key status,
     count(*) as total : Integer
   } group by category, status;
+
+  @readonly
+  entity RequestTypeCodes as projection on eams.RequestTypeCode;
 }
+
+annotate EAMSService.AssetRequests with {
+  status @readonly;
+  decisionRemarks @readonly;
+  approver @Core.Computed;
+  decisionDate @readonly;
+};

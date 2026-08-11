@@ -83,6 +83,27 @@ annotate service.AssetRequests with @(
 );
 
 annotate service.AssetRequests with {
+    requestType @(
+        Common.ValueListWithFixedValues : true,
+        Common.ValueList : {
+            $Type : 'Common.ValueListType',
+            CollectionPath : 'RequestTypeCodes',
+            Parameters : [
+                {
+                    $Type : 'Common.ValueListParameterInOut',
+                    LocalDataProperty : requestType,
+                    ValueListProperty : 'code',
+                },
+                {
+                    $Type : 'Common.ValueListParameterDisplayOnly',
+                    ValueListProperty : 'name',
+                },
+            ],
+        }
+    );
+};
+
+annotate service.AssetRequests with {
     employee @Common.ValueList : {
         $Type : 'Common.ValueListType',
         CollectionPath : 'Employees',
@@ -140,6 +161,13 @@ annotate service.AssetRequests with {
             },
         ],
     }
+};
+
+annotate service.AssetRequests with {
+    asset @(
+        Common.Text : asset.assetTag,
+        Common.TextArrangement : #TextOnly
+    );
 };
 
 annotate service.AssetRequests with {
