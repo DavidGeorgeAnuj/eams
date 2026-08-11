@@ -4,8 +4,9 @@ service EAMSService @(path: '/eams') {
 
   @cds.redirection.target
   @restrict: [
-    { grant: 'READ', to: ['Employee', 'Manager', 'AssetAdmin', 'SysAdmin'] },
-    { grant: ['CREATE', 'UPDATE', 'DELETE'], to: ['AssetAdmin'] }
+    { grant: 'READ', to: ['Employee', 'Manager', 'AssetAdmin', 'SysAdmin', 'ITSupport'] },
+    { grant: ['CREATE', 'DELETE'], to: ['AssetAdmin'] },
+    { grant: 'UPDATE', to: ['AssetAdmin', 'ITSupport'] }
   ]
   entity Assets as projection on eams.Asset;
 
@@ -14,7 +15,8 @@ service EAMSService @(path: '/eams') {
 
   @restrict: [
     { grant: ['READ', 'CREATE'], to: ['Employee', 'Manager'] },
-    { grant: '*', to: ['Manager'] }
+    { grant: '*', to: ['Manager'] },
+    { grant: 'READ', to: ['ITSupport'] }
   ]
   entity AssetRequests as projection on eams.AssetRequest actions {
     action approve(remarks: String) returns AssetRequests;
