@@ -1,0 +1,4 @@
+ID,name,email,department,designation,reportingManager_ID,userID
+e1000001-0000-0000-0000-000000000001,Alice Menon,alice@company.com,Engineering,Software Engineer,e1000001-0000-0000-0000-000000000002,alice
+e1000001-0000-0000-0000-000000000002,Bob Nair,bob@company.com,Engineering,Engineering Manager,,bob
+e1000001-0000-0000-0000-000000000003,Carol Iyer,carol@company.com,IT,Asset Admin,,carol

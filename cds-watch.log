@@ -1,0 +1,32 @@
+nohup: ignoring input
+resolving cloud service bindings...
+bound db to cf managed service eams-db:eams-db-key
+[cds] - loaded model from 3 file(s):
+ 
+  srv/service.cds
+  db/schema.cds
+  node_modules/@sap/cds/common.cds
+
+[cds] - connect to db > hana {
+  database_id: '19e2b98b-62cd-41aa-a058-65affd3ea844',
+  host: '19e2b98b-62cd-41aa-a058-65affd3ea844.hna0.prod-us10.hanacloud.ondemand.com',
+  port: '443',
+  driver: 'com.sap.db.jdbc.Driver',
+  url: 'jdbc:sap://19e2b98b-62cd-41aa-a058-65affd3ea844.hna0.prod-us10.hanacloud.ondemand.com:443?encrypt=true&validateCertificate=true&currentschema=53D4ACCC7B674BC3871DF5B6A4B34BAC',
+  schema: '53D4ACCC7B674BC3871DF5B6A4B34BAC',
+  certificate: '...',
+  hdi_user: '53D4ACCC7B674BC3871DF5B6A4B34BAC_EGK82MFU1KI3I7807ZFK8FAHU_DT',
+  hdi_password: '...',
+  user: '53D4ACCC7B674BC3871DF5B6A4B34BAC_EGK82MFU1KI3I7807ZFK8FAHU_RT',
+  password: '...'
+}
+[cds] - using auth strategy { kind: 'mocked' }
+[cds] - serving EAMSService {
+  at: [ '/eams' ],
+  decl: 'srv/service.cds:3',
+  impl: 'srv/service.js'
+}
+[cds] - server listening on { url: 'http://localhost:4004' }
+[cds] - server v9.9.3 launched in 320 ms
+[odata] - GET /eams/$metadata 
+[odata] - GET /eams/$metadata 

@@ -1,0 +1,53 @@
+{
+  "name": "eams",
+  "version": "1.0.0",
+  "dependencies": {
+    "@cap-js/hana": "^2",
+    "@sap/cds": "^9"
+  },
+  "devDependencies": {
+    "@cap-js/sqlite": "^2.4",
+    "cds-plugin-ui5": "^0.17.0"
+  },
+  "scripts": {
+    "start": "cds-serve",
+    "watch-requests": "cds watch --open requests/index.html?sap-ui-xx-viewCache=false --livereload false",
+    "watch-assets": "cds watch --open assets/index.html?sap-ui-xx-viewCache=false --livereload false"
+  },
+  "private": true,
+  "cds": {
+    "requires": {
+      "auth": {
+        "kind": "mocked",
+        "users": {
+          "alice": {
+            "password": "alice",
+            "roles": [
+              "Employee"
+            ]
+          },
+          "bob": {
+            "password": "bob",
+            "roles": [
+              "Employee",
+              "Manager"
+            ]
+          },
+          "carol": {
+            "password": "carol",
+            "roles": [
+              "AssetAdmin"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "workspaces": [
+    "app/*"
+  ],
+  "sapux": [
+    "app/requests",
+    "app/assets"
+  ]
+}
