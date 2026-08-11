@@ -3,6 +3,13 @@
   "authenticationMethod": "route",
   "routes": [
     {
+      "source": "^/?eams/(.*)$",
+      "target": "/eams/$1",
+      "destination": "srv-api",
+      "authenticationType": "xsuaa",
+      "csrfProtection": true
+    },
+    {
       "source": "^/?odata/(.*)$",
       "target": "/odata/$1",
       "destination": "srv-api",
